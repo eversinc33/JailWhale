@@ -31,10 +31,20 @@ sleep 1
 INODE_NUM=`ls -ali / | sed '2!d' |awk {'print $1'}`
 if [ "$INODE_NUM" -eq '2' ]; then
 	log_y "You are ${WHITE}not${NC} in a container!"
-    # exit
 else
 	log_g "You are in a container!"
-	# TODO log info about container, id etc
+	
+	OS=$(cat /etc/os-release 2>/dev/null | grep PRETTY | cut -d'"' -f2)
+	if [ "$OS" = "" ]; then
+		# for some other distros
+		OS=$(cat /etc/issue | cut -d'\' -f1)
+	fi
+	log_hint "${WHITE}OS: ${OS}${NC}"
+	
+	CONTAINER_ID=$(basename "$(cat /proc/1/cpuset)")
+	SHORT_ID=$(echo $CONTAINER_ID | cut -c -12)
+	LONG_ID=$(echo $CONTAINER_ID | cut -c 13-)
+	log_hint "${WHITE}ID: ${SHORT_ID}${GREY}${LONG_ID}${NC}"
 fi
 sleep 1
 
@@ -42,11 +52,15 @@ heading "Looking for docker executable"
 if [ $(which docker) ]; then
 	log_g "docker executable exists at $WHITE$(which docker)$NC"
 	log   "You can try escaping by creating a container and mounting the host system$NC"
-	if id -nG "$(whoami)" | grep -qw "docker"; then
-		log_g "You are part of the ${WHITE}docker${NC} group"
-	else
-		log_y "You are not part of the ${WHITE}docker${NC} group."
-		log   "Try running ${WHITE}sudo -l${NC} or escalate privileges to run docker."
+	
+	# if not root
+	if [ $(id -u) -ne 0 ]; then
+		if id -nG "$(whoami)" | grep -qw "docker"; then
+			log_g "You are part of the ${WHITE}docker${NC} group"
+		else
+			log_y "You are not part of the ${WHITE}docker${NC} group."
+			log   "Try running ${WHITE}sudo -l${NC} or escalate privileges to run docker."
+		fi
 	fi
 else
 	log_y "No docker executable found"
@@ -60,7 +74,7 @@ if [ -e /var/docker.sock ]; then
 else
 	DOCKER_SOCK=$(find / -name docker.sock 2>/dev/null)
 	if ! [ -z $DOCKER_SOCK ]; then
-		log_g "docker.sock is mounted at $WHITE$DOCKER_SOCK$NC"
+		log_g "docker.sock is mounted at ${WHITE}${DOCKER_SOCK}${NC}"
 		log   "You can call the docker-api using ${WHITE}curl --unix-socket${NC}"
 	fi
 fi
@@ -75,7 +89,10 @@ for PORT in $PORTS; do
 		FOUND=1
 	fi
 done
-! [ $FOUND -eq 1 ] && log_y "Port ${WHITE}2375${NC} and ${WHITE}2376${NC} are closed"
+if ! [ $FOUND -eq 1 ]; then
+	log_y "Port ${WHITE}2375${NC} and ${WHITE}2376${NC} are closed"
+	log_hint "The api might be exposed on other ports."
+fi
 sleep 1
 
 heading "Looking for exploitable capabilities"
@@ -98,7 +115,7 @@ sleep 1
 
 heading "Checking CVEs"
 echo "... Checking ${WHITE}CVE-2020-15257 (Abstract Shimmer)${NC}"
-if cat /proc/net/unix | grep '@/containerd'; then
+if cat /proc/net/unix | grep 'containerd-shim' | grep '@'; then
 	log_g "Container appears to be vulnerable!"
 else
 	log_grey "Container does not appear to be vulnerable"
